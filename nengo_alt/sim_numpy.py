@@ -102,7 +102,7 @@ class LIFNeurons(ImplBase):
         voltage = state[self.inputs['voltage']]
         refractory_time = state[self.inputs['refractory_time']]
         try:
-            J = j_bias + state[self.inputs['input_current']]
+            J = j_bias + alpha * state[self.inputs['input_current']]
         except KeyError:
             J  = j_bias 
         tau_rc = self.tau_rc
@@ -126,7 +126,8 @@ class LIFNeurons(ImplBase):
 
         # determine which neurons spike
         # if v > 1 set spiked = 1, else 0
-        spiked = (v > 1)
+        spiked = np.zeros(len(v))
+        spiked[v > 1] = 1.0
 
         # adjust refractory time (neurons that spike get
         # a new refractory time set, all others get it reduced by dt)
@@ -137,9 +138,8 @@ class LIFNeurons(ImplBase):
 
         # adjust refractory time (neurons that spike get a new
         # refractory time set, all others get it reduced by dt)
-        new_refractory_time = (
-            spiked * (spiketime + tau_ref)
-            + (1 - spiked) * (refractory_time - dt))
+        new_refractory_time = np.where(spiked, 
+            spiketime + tau_ref, refractory_time - dt)
 
         new_voltage = v * (1 - spiked)
         new_output = spiked
@@ -287,7 +287,7 @@ class Filter(ImplBase):
 
         if pstc >= dt:
             decay = np.exp(-dt / pstc)
-            output = decay * var + (1 - decay) * X_prev
+            output = (1 - decay) * var + decay * X_prev
         else:
             output = var
 
@@ -349,8 +349,12 @@ class MSE_MinimizingConnection(ImplBase):
 
         prediction = np.dot(weights, src)
 
+        # XXX this learning rule is fast at first, but slow to converge
+        #     because the prediction has spike noise on it. It would converge
+        #     better if the error signal was smoothed out.
+
         grad = target - prediction
-        weights = weights + np.outer(grad, src) * self.learning_rate
+        weights += np.outer(grad, src) * self.learning_rate
 
         state[self.outputs['X']] = prediction
         state[self.outputs['error_signal']] = ((grad) ** 2).sum()

@@ -114,32 +114,50 @@ class SmokeTests(unittest.TestCase):
         nose.tools.assert_raises(API.MultipleSourceError,
             self.Simulator, net, dt=0.001, verbosity=0)
 
-    def test_learning_rate(self, N=100, cls=API.LIFRateNeurons, lr=1e-4):
+    def test_learning(self, N=100, lr=1e-4):
         net = Network()
-        tn = net.add(TimeNode(math.sin, name='sin'))
 
-        ens1 = net.add(cls(N))
+        def sinK(t):
+            return math.sin(4 * t)
 
-        conn = net.add(
+        tn = net.add(TimeNode(sinK, name='sin'))
+
+        rate_neurons = net.add(API.LIFRateNeurons(N))
+        spiking_neurons = net.add(API.LIFNeurons(N))
+
+        rate_conn = net.add(
             MSE_MinimizingConnection(
-                ens1.output,
+                rate_neurons.output,
                 API.Var(size=1),
                 target=tn.output,
                 learning_rate=lr))
-        rec = net.add(
+        rate_enc = net.add(
             API.RandomConnection(
                 tn.output,
-                ens1.input_current,
-                API.Uniform(-20.010, 20.010, seed=123)
+                rate_neurons.input_current,
+                API.Uniform(-5.010, 5.010, seed=123)
                 ))
 
-        filt = net.add(API.Filter(conn.output, .01))
+        spiking_conn = net.add(
+            MSE_MinimizingConnection(
+                spiking_neurons.output,
+                API.Var(size=1),
+                target=tn.output,
+                learning_rate=lr))
+        spiking_enc = net.add(
+            API.RandomConnection(
+                tn.output,
+                spiking_neurons.input_current,
+                API.Uniform(-5.010, 5.010, seed=123)
+                ))
 
-        net.add(Probe(conn.output))
+        filt = net.add(API.Filter(spiking_conn.output, .01))
+
+        net.add(Probe(rate_conn.output))
+        net.add(Probe(spiking_conn.output))
         net.add(Probe(filt.output))
         net.add(Probe(tn.output))
-        net.add(Probe(ens1.input_current))
-        net.add(Probe(ens1.output))
+        net.add(Probe(rate_neurons.input_current))
 
         sim = self.Simulator(net, dt=0.001, verbosity=0)
 
@@ -148,30 +166,40 @@ class SmokeTests(unittest.TestCase):
 
         iters = 30
         for i in range(iters):
-            last = i == iters - 1
-            if last:
-                conn.learning_rate = 0
+            test_time = (i % 5 == 4)
+            if test_time:
+                # XXX changing learning rate here is not guaranteed
+                # to affect all backends correctly
+                rate_conn.learning_rate = 0
+                spiking_conn.learning_rate = 0
+            else:
+                rate_conn.learning_rate = lr
+                spiking_conn.learning_rate = lr
             results = sim.run(2 * math.pi)
             # -- tests that the learned connection does better than predict
             #    mean 0
-            pred_out = results[conn.output]
+            rate_out = results[rate_conn.output]
+            spiking_out = results[spiking_conn.output]
             filt_out = results[filt.output]
             want_out = results[tn.output]
-            neur_out = np.asarray(results[ens1.output])
-            if 0 and ((i % 5 == 0) or last):
-                plt.plot(pred_out)
-                plt.plot(want_out)
+            if 1 and test_time:
+                plt.plot(spiking_out)
                 plt.plot(filt_out)
-                for i in range(20):
-                    plt.plot(neur_out[:, i])
+                plt.plot(rate_out)
+                plt.plot(want_out)
+                #for i in range(20):
+                    #plt.plot(neur_out[:, i])
                 plt.show()
 
-            mse = sum([(po - wo) ** 2 for po, wo in zip(pred_out, want_out)])
-            print mse
+            #weights = sim.state[rate_conn.outputs['weights']]
+            #sim.state[spiking_conn.outputs['weights']] = weights
+            #sim.state[spiking_conn.inputs['weights']] = weights
 
-        assert mse < 10
+            rate_mse = sum([(po - wo) ** 2 for po, wo in zip(rate_out, want_out)])
+            spiking_mse = sum([(po - wo) ** 2 for po, wo in zip(filt_out, want_out)])
+            print 'test_time', test_time,
+            print 'rate mse:', rate_mse, 'spiking_mse:', spiking_mse
 
-        #ens1 = net.add(API.LIFNeurons(N))
+        assert rate_mse < 10, rate_mse
+        assert spiking_mse < 10, spiking_mse
 
-    def test_learning_spiking(self, N=100):
-        return self.test_learning_rate(N=N, cls=API.LIFNeurons, lr=1e-4)
