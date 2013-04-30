@@ -76,6 +76,102 @@ class Array1(MultiArray):
         self.data[idx] = val
 
 
+class Array2(MultiArray):
+    def __init__(self, data, shape):
+        rows, cols = shape
+        MultiArray.__init__(self, shape)
+        self.data = data
+        self.arr = []
+        self.rows, self.cols = shape
+        assert len(data) == rows * cols
+        for ii in xrange(rows):
+            self.arr.append(data[ii * cols: (ii + 1) * cols])
+
+    def __iter__(self): # numpy-like
+        return iter(self.arr)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, int):
+            return self.arr[idx]
+        else:
+            raise NotImplementedError()
+
+    def __setitem__(self, idx, val):
+        if isinstance(idx, int):
+            if len(val) != self.shape[1]:
+                raise ValueError('wrong number of columns')
+            self.arr[idx] = val
+        else:
+            raise NotImplementedError()
+
+
+def dot(a, b):
+    if isinstance(a, Array2) and isinstance(b, Array1):
+        rval = []
+        for rr in xrange(a.shape[0]):
+            ksum = 0
+            a_rr = a[rr]
+            for cc in xrange(a.shape[1]):
+                ksum += a_rr[cc] * b[cc]
+            rval.append(ksum)
+        return Array1(rval)
+    else:
+        raise NotImplementedError()
+
+def outer(a, b):
+    if isinstance(a, Array1) and isinstance(b, Array1):
+        rval = []
+        for rr in xrange(a.shape[0]):
+            for cc in xrange(b.shape[0]):
+                rval.append(a[rr] * b[cc])
+        return Array2(rval, (a.shape[0], b.shape[0]))
+    else:
+        raise NotImplementedError()
+
+
+def sub(a, b):
+    if isinstance(a, Array1) and isinstance(b, Array1):
+        if len(a) != len(b):
+            raise ValueError()
+        return Array1([ai - bi for ai, bi in zip(a, b)])
+    elif isinstance(a, (float, int)) and isinstance(b, Array1):
+        return Array1([a - bi for bi in b])
+    else:
+        raise NotImplementedError('sub', (type(a), type(b)))
+
+def add(a, b):
+    if isinstance(a, Array1) and isinstance(b, Array1):
+        if len(a) != len(b):
+            raise ValueError()
+        return Array1([ai + bi for ai, bi in zip(a, b)])
+    elif isinstance(a, Array2) and isinstance(b, Array2):
+        if a.shape != b.shape:
+            raise ValueError()
+        return Array2([ai + bi for ai, bi in zip(a.data, b.data)], a.shape)
+    elif isinstance(a, (float, int)) and isinstance(b, Array1):
+        return Array1([a + bi for bi in b])
+    else:
+        raise NotImplementedError('add', (type(a), type(b)))
+
+
+def mul_scalar(a, b):
+    if isinstance(a, Array1):
+        return Array1([ai * b for ai in a])
+    elif isinstance(a, Array2):
+        return Array2([ai * b for ai in a.data], a.shape)
+    else:
+        raise NotImplementedError()
+
+def pow_scalar(a, b):
+    if isinstance(a, Array1):
+        return Array1([ai ** b for ai in a])
+    elif isinstance(a, Array2):
+        return Array2([ai ** b for ai in a.data], a.shape)
+    else:
+        raise NotImplementedError()
+
+
+
 def scheduling_graph(network):
     all_members = network.all_members
     DG = nx.DiGraph()
@@ -409,6 +505,53 @@ class Connection(ImplBase):
         src = state[self.inputs['X']]
         dst = src.copy()
         state[self.outputs['X']] = dst
+
+
+@register_impl
+class RandomConnection(ImplBase):
+    @staticmethod
+    def reset(self, state):
+        n_in = self.src.size
+        n_out = self.dst.size
+        weights = draw(self.dist, random.Random(self.dist.seed),
+                       n_out * n_in)
+
+        state[self.outputs['X']] = Array1([0] * n_out)
+        state[self.outputs['weights']] = Array2(weights, (n_out, n_in))
+
+    @staticmethod
+    def step(self, state):
+        src = state[self.inputs['X']]
+        weights = state[self.inputs['weights']]
+        state[self.output] = dot(weights, src)
+        state[self.outputs['weights']] = weights
+
+@register_impl
+class MSE_MinimizingConnection(ImplBase):
+    @staticmethod
+    def reset(self, state):
+        n_in = self.src.size
+        n_out = self.dst.size
+        weights = Array2([0] * n_out * n_in, (n_out, n_in))
+
+        state[self.outputs['X']] = Array1([0] * n_out)
+        state[self.outputs['error_signal']] = Array1([0] * n_out)
+        state[self.outputs['weights']] = weights
+
+    @staticmethod
+    def step(self, state):
+        src = state[self.inputs['X']]
+        target = state[self.inputs['target']]
+        weights = state[self.inputs['weights']]
+
+        prediction = dot(weights, src)
+
+        grad = sub(target, prediction)
+        weights = add(weights, mul_scalar(outer(grad, src), self.learning_rate))
+
+        state[self.outputs['X']] = prediction
+        state[self.outputs['error_signal']] = sum(pow_scalar(grad, 2).data)
+        state[self.outputs['weights']] = weights
 
 
 @register_impl

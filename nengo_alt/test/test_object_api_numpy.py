@@ -10,6 +10,8 @@ from nengo.object_api import (
         )
 import test_object_api
 
+import nengo_alt.sim_numpy # install numpy backend
+
 class SmokeTests(test_object_api.SmokeTests):
     def Simulator(self, *args, **kwargs):
         return Simulator(backend='numpy', *args, **kwargs)

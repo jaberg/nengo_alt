@@ -77,12 +77,12 @@ class LIFNeurons(ImplBase):
         r2 = np.random.RandomState(neurons.intercept.seed)
 
         max_rates = draw(neurons.max_rate, r1, neurons.size)
-        threshold = draw(neurons.intercept, r2, neurons.size)
+        intercepts = draw(neurons.intercept, r2, neurons.size)
         
         u = neurons.tau_ref - (1.0 / max_rates)
         x = 1.0 / (1 - np.exp(u / neurons.tau_rc))
-        alpha = (1 - x) / threshold
-        j_bias = 1 - alpha * threshold 
+        alpha = (1 - x) / (intercepts - 1.0)
+        j_bias = 1 - alpha * intercepts 
 
         state[neurons.alpha] = alpha
         state[neurons.j_bias] = j_bias
@@ -97,8 +97,10 @@ class LIFNeurons(ImplBase):
 
     @staticmethod
     def step(self, state):
-        alpha, j_bias, voltage, refractory_time = [
-            state[self.inputs[name]] for name in self._input_names]
+        alpha = state[self.inputs['alpha']]
+        j_bias = state[self.inputs['j_bias']]
+        voltage = state[self.inputs['voltage']]
+        refractory_time = state[self.inputs['refractory_time']]
         try:
             J = j_bias + state[self.inputs['input_current']]
         except KeyError:
@@ -147,6 +149,61 @@ class LIFNeurons(ImplBase):
         state[self.outputs['voltage']] = new_voltage
         state[self.outputs['refractory_time']] = new_refractory_time
         state[self.outputs['X']] = new_output
+
+
+@register_impl
+class LIFRateNeurons(ImplBase):
+
+    @staticmethod
+    def build(self, state, dt):
+        r1 = np.random.RandomState(self.max_rate.seed)
+        r2 = np.random.RandomState(self.intercept.seed)
+
+        max_rates = draw(self.max_rate, r1, self.size)
+        intercepts = draw(self.intercept, r2, self.size)
+        
+        u = self.tau_ref - (1.0 / max_rates)
+        x = 1.0 / (1 - np.exp(u / self.tau_rc))
+        alpha = (1 - x) / (intercepts - 1.0)
+        j_bias = 1 - alpha * intercepts 
+
+        state[self.alpha] = alpha
+        state[self.j_bias] = j_bias
+        LIFRateNeurons.reset(self, state)
+
+    @staticmethod
+    def reset(self, state):
+        state[self.output] = np.zeros(self.size)
+
+    @staticmethod
+    def step(self, state):
+        alpha = state[self.inputs['alpha']]
+        j_bias = state[self.inputs['j_bias']]
+        try:
+            J = j_bias + state[self.inputs['input_current']]
+        except KeyError:
+            J  = j_bias 
+        dt = state[API.simulation_time] - state[API.simulation_time.delayed()]
+        tau_rc = self.tau_rc
+        tau_ref = self.tau_ref
+
+        J += J * alpha
+        # set up denominator of LIF firing rate equation (nan get removed below)
+        rate = self.tau_ref - self.tau_rc * np.log1p(- 1.0 / np.maximum(J, 0))
+        #print rate
+        
+        # if input current is enough to make neuron spike,
+        # calculate firing rate, else return 0
+        rate = dt / rate
+
+        rate[J <= 1] = 0
+        # store in the state variable
+        assert np.all(np.isfinite(rate))
+        assert np.all(rate >= 0)
+
+        state[self.outputs['alpha']] = alpha
+        state[self.outputs['j_bias']] = j_bias
+        state[self.output] = rate
 
 
 register_impl(API_PY.Connection)
@@ -223,7 +280,18 @@ class Filter(ImplBase):
     def step(self, state):
         X_prev = state[self.inputs['X_prev']]
         var = state[self.inputs['var']]
-        state[self.output] = X_prev + self.tau * var
+
+        dt = state[API.simulation_time] - state[API.simulation_time.delayed()]
+
+        pstc = self.tau # XXX
+
+        if pstc >= dt:
+            decay = np.exp(-dt / pstc)
+            output = decay * var + (1 - decay) * X_prev
+        else:
+            output = var
+
+        state[self.output] = output
 
 
 @register_impl
@@ -244,7 +312,6 @@ class Adder(ImplBase):
 class RandomConnection(ImplBase):
     @staticmethod
     def reset(self, state):
-        # RNG: need seed
         n_in = self.src.size
         n_out = self.dst.size
         weights = draw(self.dist, np.random.RandomState(self.dist.seed),
@@ -257,7 +324,8 @@ class RandomConnection(ImplBase):
     def step(self, state):
         src = state[self.inputs['X']]
         weights = state[self.inputs['weights']]
-        state[self.output] = np.dot(weights, src)
+        rval = np.dot(weights, src)[:, 0]
+        state[self.output] = rval
         state[self.outputs['weights']] = weights
 
 
@@ -265,10 +333,9 @@ class RandomConnection(ImplBase):
 class MSE_MinimizingConnection(ImplBase):
     @staticmethod
     def reset(self, state):
-        # RNG: need seed
         n_in = self.src.size
         n_out = self.dst.size
-        weights = np.random.randn(n_out, n_in)
+        weights = np.zeros((n_out, n_in))
 
         state[self.outputs['X']] = np.zeros(n_out)
         state[self.outputs['error_signal']] = np.zeros(n_out)

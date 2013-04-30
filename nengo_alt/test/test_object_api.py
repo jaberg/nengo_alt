@@ -1,4 +1,4 @@
-from math import sin
+import math
 import unittest
 
 import nose.tools
@@ -23,7 +23,7 @@ class SmokeTests(unittest.TestCase):
 
     def test_smoke_1(self):
         net = Network()
-        tn = net.add(TimeNode(sin, name='sin'))
+        tn = net.add(TimeNode(math.sin, name='sin'))
         net.add(Probe(tn.output))
         net.add(Probe(simulation_time))
         sim = self.Simulator(net, dt=0.001, verbosity=0)
@@ -31,7 +31,7 @@ class SmokeTests(unittest.TestCase):
 
         assert len(results[simulation_time]) == 101
         for i, t in enumerate(results[simulation_time]):
-            assert results[tn.output][i] == sin(t)
+            assert results[tn.output][i] == math.sin(t)
 
     def test_smoke_2(self):
         net = Network()
@@ -114,31 +114,64 @@ class SmokeTests(unittest.TestCase):
         nose.tools.assert_raises(API.MultipleSourceError,
             self.Simulator, net, dt=0.001, verbosity=0)
 
-    def test_learning(self):
+    def test_learning_rate(self, N=100, cls=API.LIFRateNeurons, lr=1e-4):
         net = Network()
-        tn = net.add(TimeNode(sin, name='sin'))
+        tn = net.add(TimeNode(math.sin, name='sin'))
 
-        ens1 = net.add(
-            LIFNeurons(50))
+        ens1 = net.add(cls(N))
+
         conn = net.add(
             MSE_MinimizingConnection(
                 ens1.output,
-                API.Var(name='sin_prediction', size=1),
+                API.Var(size=1),
                 target=tn.output,
-                learning_rate=0.03))
+                learning_rate=lr))
         rec = net.add(
             API.RandomConnection(
-                ens1.output,
+                tn.output,
                 ens1.input_current,
-                API.Uniform(-.12, .12, seed=123)
+                API.Uniform(-20.010, 20.010, seed=123)
                 ))
 
-        err_probe = net.add(Probe(conn.error_signal))
-        sin_probe = net.add(Probe(tn.output))
+        filt = net.add(API.Filter(conn.output, .01))
+
+        net.add(Probe(conn.output))
+        net.add(Probe(filt.output))
+        net.add(Probe(tn.output))
+        net.add(Probe(ens1.input_current))
+        net.add(Probe(ens1.output))
 
         sim = self.Simulator(net, dt=0.001, verbosity=0)
-        for i in range(10):
-            results = sim.run(1.0)
-            print sum(results[err_probe.target]),
-            print sum([x ** 2 for x in results[sin_probe.target]])
 
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        iters = 30
+        for i in range(iters):
+            last = i == iters - 1
+            if last:
+                conn.learning_rate = 0
+            results = sim.run(2 * math.pi)
+            # -- tests that the learned connection does better than predict
+            #    mean 0
+            pred_out = results[conn.output]
+            filt_out = results[filt.output]
+            want_out = results[tn.output]
+            neur_out = np.asarray(results[ens1.output])
+            if 0 and ((i % 5 == 0) or last):
+                plt.plot(pred_out)
+                plt.plot(want_out)
+                plt.plot(filt_out)
+                for i in range(20):
+                    plt.plot(neur_out[:, i])
+                plt.show()
+
+            mse = sum([(po - wo) ** 2 for po, wo in zip(pred_out, want_out)])
+            print mse
+
+        assert mse < 10
+
+        #ens1 = net.add(API.LIFNeurons(N))
+
+    def test_learning_spiking(self, N=100):
+        return self.test_learning_rate(N=N, cls=API.LIFNeurons, lr=1e-4)
