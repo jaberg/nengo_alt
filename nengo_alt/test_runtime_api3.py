@@ -11,7 +11,7 @@ from api3 import LIFMultiEnsemble
 for n_ensembles in [10, 100, 1000, 10000]:
     for size in [10, 100, 1000]:
         for rank in [1, 2, 50]:
-            if n_ensembles * size * rank > 10 * 1000 * 1000:
+            if n_ensembles * size * rank >= 10 * 1000 * 1000:
                 continue
             key = (n_ensembles, size, rank)
             simtime = 0.5
@@ -23,6 +23,7 @@ for n_ensembles in [10, 100, 1000, 10000]:
                     signal_size=rank,
                     queue=queue)
 
+            # TODO: set up the weights to do a real fn
             mdl._randomize_decoders(rng=np.random)
             mdl._randomize_encoders(rng=np.random)
             prog = mdl.prog(dt=0.001)
