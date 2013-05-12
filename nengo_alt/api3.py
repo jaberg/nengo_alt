@@ -2,6 +2,7 @@ import pyopencl as cl
 from ocl import array
 from ocl.plan import Plan, Prog
 from ocl.lif import plan_lif
+from ocl.gemv_batched import plan_misc_gemv
 
 class LIFMultiEnsemble(object):
     def __init__(self, n_populations, n_neurons_per, n_signals, signal_size,
@@ -17,8 +18,6 @@ class LIFMultiEnsemble(object):
         self.__dict__.update(locals())
         del self.self
 
-        # XXX Make Fortran layout an option (better for GPU)
-
         self.lif_v = array.zeros(queue,
                 shape=(n_populations, n_neurons_per),
                 dtype='float32')
@@ -31,28 +30,34 @@ class LIFMultiEnsemble(object):
                 shape=(n_populations, n_neurons_per),
                 dtype='float32')
 
+        self.lif_bias = array.zeros(queue,
+                shape=(n_populations, n_neurons_per),
+                dtype='float32')
+
         self.lif_output = array.zeros(queue,
                 shape=(n_populations, n_neurons_per),
-                dtype='float32') # XXX make int8
+                dtype='float32')
 
         self.signals = array.zeros(queue,
                 shape=(n_signals, signal_size),
                 dtype='float32')
 
         self.encoders = array.zeros(queue,
-                shape=(signal_size, n_enc_per_population, n_populations),
+                shape=(n_populations, n_neurons_per, n_enc_per_population,
+                    signal_size),
                 dtype='float32')
 
         self.encoders_signal_idx = array.zeros(queue,
-                shape=(n_enc_per_population, n_populations),
+                shape=(n_populations, n_enc_per_population),
                 dtype='int32')
 
         self.decoders = array.zeros(queue,
-                shape=(n_populations, signal_size, n_enc_per_population),
+                shape=(n_signals, signal_size, n_dec_per_signal,
+                    n_neurons_per),
                 dtype='float32')
 
         self.decoders_population_idx = array.zeros(queue,
-                shape=(n_dec_per_signal, n_signals),
+                shape=(n_signals, n_dec_per_signal),
                 dtype='int32')
 
     def _randomize_encoders(self, rng):
@@ -80,15 +85,39 @@ class LIFMultiEnsemble(object):
                 )
         return rval
 
-    def decoder_plan(self):
-        raise NotImplementedError()
+    def decoder_plan(self, signals_beta=0.0):
+        if self.n_dec_per_signal != 1:
+            raise NotImplementedError()
+        rval = plan_misc_gemv(self.queue,
+                alpha=1.0,
+                A=self.decoders[:, :, 0],
+                X=self.lif_output, # use filtered here
+                Xi=self.decoders_population_idx[:, 0],
+                beta=signals_beta,
+                Y=self.signals,)
+        return rval
 
-    def encoder_plan(self):
-        raise NotImplementedError()
+    def encoder_plan(self, lif_ic_beta=1.0):
+        if self.n_enc_per_population != 1:
+            raise NotImplementedError()
+        rval = plan_misc_gemv(self.queue,
+                alpha=1.0,
+                A=self.encoders[:, :, 0],
+                X=self.signals, # use filtered here
+                Xi=self.encoders_signal_idx[:, 0],
+                beta=lif_ic_beta,
+                Y_in=self.lif_bias,
+                Y=self.lif_ic)
+        return rval
 
     def prog(self, dt):
         neuron_plan = self.neuron_plan(dt)
+        decoder_plan = self.decoder_plan()
+        encoder_plan = self.encoder_plan()
 
-        return Prog([neuron_plan])
+        return Prog([
+            encoder_plan,
+            neuron_plan,
+            decoder_plan])
 
 

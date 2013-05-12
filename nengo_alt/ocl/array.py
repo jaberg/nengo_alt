@@ -28,16 +28,21 @@ class Array(cl.array.Array):
         shape = list(self.shape)
         strides = list(self.strides)
         offset = self.offset
+        dims_to_del = []
         if isinstance(item, (list, tuple)):
             for ii, idx in enumerate(item):
                 if isinstance(idx, int):
-                    raise NotImplementedError()
+                    dims_to_del.append(ii)
+                    offset += idx * strides[ii]
                 elif isinstance(idx, slice):
                     start, stop, stride = idx.indices(shape[ii])
                     offset += start * strides[ii]
                     if stride != 1:
                         raise NotImplementedError()
                     shape[ii] = stop - start
+            for dim in reversed(dims_to_del):
+                shape.pop(dim)
+                strides.pop(dim)
             return self.__class__(
                     self.queue, shape, self.dtype,
                     data=self.data,
@@ -109,6 +114,7 @@ def ocldtype(obj):
             'float32': 'float',
             'float64': 'double',
             'int64': 'long',
+            'int32': 'int',
         }[obj]
     else:
         raise NotImplementedError('ocldtype', obj)

@@ -1,0 +1,17 @@
+Fortran layout ?
+
+dtype choices?
+
+misc_gemv on GPU
+
+support for n_enc_per_population > 1
+
+support for n_dec_per_population > 1
+
+support for neuron noise models
+
+port over some templates from nengo_theano:
+* basal_ganglia
+* abs
+* dotprod
+
