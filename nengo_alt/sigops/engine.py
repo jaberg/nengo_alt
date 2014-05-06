@@ -1,6 +1,3 @@
-#TODO: replace nengo/utils.graphs with this
-#from sigops.graph_algos import graph, toposort, reverse_edges, add_edges
-
 from .signaldict import SignalDict
 from .graph_algos import toposort
 from .depgraph import operator_depencency_graph
