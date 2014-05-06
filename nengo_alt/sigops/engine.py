@@ -1,7 +1,15 @@
+#TODO: replace nengo/utils.graphs with this
+#from sigops.graph_algos import graph, toposort, reverse_edges, add_edges
 
 from .signaldict import SignalDict
 from .graph_algos import toposort
 from .depgraph import operator_depencency_graph
+
+def is_op(thing):
+    try:
+        return thing._is_sigops_operator
+    except AttributeError:
+        return False
 
 
 class Engine(object):
@@ -21,11 +29,13 @@ class Engine(object):
 
         """
         self.signals = SignalDict() if signals is None else signals
+        self._operators = operators
         map(self._init_signals, operators)
         self.dg = operator_depencency_graph(operators)
-        self._step_order = [node for node in toposort(self.dg)
-                            if hasattr(node, 'make_step')]
-        self._steps = map(self._make_step, self._step_order)
+        self._topo_all = toposort(self.dg)
+        self._topo_ops = filter(is_op, self._topo_all)
+        self._steps = [self._make_step(step) for step in self._topo_ops
+                       if step is not None]
         self.n_steps = 0
 
     def step(self, N=1):

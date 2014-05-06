@@ -27,6 +27,8 @@ class Operator(object):
     Each operator should explicitly set each of these properties.
     """
 
+    _is_sigops_operator = True
+
     @property
     def reads(self):
         """Signals that are read and not modified"""
