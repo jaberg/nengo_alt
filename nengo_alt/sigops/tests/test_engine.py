@@ -3,10 +3,10 @@ import logging
 import numpy as np
 import pytest
 
-from nengo_alt import sigops
-from nengo_alt.sigops.operators import (
+import sigops
+from sigops.operators import (
     ProdUpdate, Copy, Reset, DotInc)
-from nengo_alt.sigops import Signal
+from sigops import Signal
 
 logger = logging.getLogger(__name__)
 
