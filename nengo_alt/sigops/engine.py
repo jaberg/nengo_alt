@@ -12,16 +12,20 @@ class Engine(object):
     def _init_signals(self, node):
         node.init_signals(self.signals)
 
-    def __init__(self, operators):
+    def __init__(self, operators, signals=None):
+        """
 
-        # -- map from Signal.base -> ndarray
-        self.signals = SignalDict()
+        operators: list of Operator instances
+
+        signals: SignalDict instance
+
+        """
+        self.signals = SignalDict() if signals is None else signals
         map(self._init_signals, operators)
         self.dg = operator_depencency_graph(operators)
         self._step_order = [node for node in toposort(self.dg)
                             if hasattr(node, 'make_step')]
         self._steps = map(self._make_step, self._step_order)
-
         self.n_steps = 0
 
     def step(self, N=1):
