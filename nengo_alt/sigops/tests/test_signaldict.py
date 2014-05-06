@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-import sigops
-from sigops import Signal
+from nengo_alt import sigops
+from nengo_alt.sigops import Signal
 
 
 def pytest_funcarg__SignalDict(request):
